@@ -1,0 +1,1243 @@
+import { useMemo, useRef, useState } from "react";
+import * as XLSX from "xlsx";
+import html2canvas from "html2canvas";
+import "./App.css";
+
+const SURVIVOR_NAMES = [
+  "エンジ", "オフェ", "カウボーイ", "バーメ", "バッツ", "ファウロ", "ポスト",
+  "マジシャン", "医師", "応援団", "火災", "画家", "患者", "玩具", "気象", "記者",
+  "騎士", "技師", "弓使い", "泣きピ", "救援", "曲芸師", "空軍", "幻灯師", "幸運児",
+  "航海士", "骨董商", "昆虫", "祭司", "作曲家", "呪術師", "囚人", "小説家", "少女",
+  "心眼", "心理", "人形師", "占い師", "脱出マスター", "探鉱者", "調香師", "庭師",
+  "泥棒", "闘牛士", "納棺師", "弁護士", "墓守", "冒険家", "野人", "傭兵", "踊り子",
+];
+
+const HUNTER_NAMES = [
+  "アイヴィ", "アン", "アンデッド", "イタカ", "オペラ", "ガラテア", "キーガン", "グレイス",
+  "ジョゼフ", "バイオリニスト", "ハスター", "バルク", "ピエロ", "ビリヤード",
+  "フールズゴールド", "フラバルー", "ボンボン", "リッパー", "ルキノ", "レオ", "悪夢",
+  "隠者", "泣き虫", "芸者", "雑貨商", "鹿", "女王", "女王蜂", "蜘蛛", "破輪",
+  "白黒無常", "魔女", "羊", "蝋人形師",
+];
+
+const ARROW_COLORS = [
+  { key: "#e11d48", label: "赤" },
+  { key: "#2563eb", label: "青" },
+  { key: "#16a34a", label: "緑" },
+  { key: "#ca8a04", label: "黄" },
+  { key: "#7c3aed", label: "紫" },
+];
+
+const DEFAULT_CIPHERS = Array.from({ length: 7 }, (_, i) => ({
+  id: i + 1,
+  value: "0",
+  visible: false,
+}));
+
+function uid(prefix = "id") {
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function cloneDeep(obj) {
+  return JSON.parse(JSON.stringify(obj));
+}
+
+function pad2(n) {
+  return String(n).padStart(2, "0");
+}
+
+function formatDateObject(d) {
+  if (!(d instanceof Date) || Number.isNaN(d.getTime())) return "";
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+function normalizeDateValue(v) {
+  if (v == null || v === "") return "";
+
+  if (v instanceof Date) return formatDateObject(v);
+
+  if (typeof v === "number" && Number.isFinite(v)) {
+    if (v > 20000 && v < 60000) {
+      try {
+        return XLSX.SSF.format("yyyy-mm-dd", v);
+      } catch {
+        return String(v);
+      }
+    }
+    return String(v);
+  }
+
+  const s = String(v).trim();
+  if (!s) return "";
+
+  if (/^\d{4}[/-]\d{1,2}[/-]\d{1,2}/.test(s)) {
+    const m = s.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})/);
+    if (m) return `${m[1]}-${pad2(m[2])}-${pad2(m[3])}`;
+  }
+
+  if (/^\d{5}$/.test(s)) {
+    const num = Number(s);
+    if (num > 20000 && num < 60000) {
+      try {
+        return XLSX.SSF.format("yyyy-mm-dd", num);
+      } catch {
+        return s;
+      }
+    }
+  }
+
+  return s;
+}
+
+function normalizeCellValue(v, headerName = "") {
+  const h = String(headerName || "").trim();
+  if (h === "日付" || h.toLowerCase() === "date") {
+    return normalizeDateValue(v);
+  }
+  return v == null ? "" : String(v);
+}
+
+function readSheetRows(workbook, sheetName) {
+  if (!workbook || !sheetName) return [];
+  const ws = workbook.Sheets[sheetName];
+  if (!ws) return [];
+
+  const rows = XLSX.utils.sheet_to_json(ws, {
+    defval: "",
+    raw: false,
+    dateNF: "yyyy-mm-dd",
+    cellDates: true,
+  });
+
+  return rows.map((row) => {
+    const out = {};
+    for (const [k, v] of Object.entries(row)) {
+      out[String(k).trim()] = normalizeCellValue(v, k);
+    }
+    return out;
+  });
+}
+
+function findValueByHeader(row, candidates) {
+  if (!row) return "";
+  const entries = Object.entries(row).map(([k, v]) => [String(k).trim(), v]);
+  for (const name of candidates) {
+    const hit = entries.find(([k]) => k === name);
+    if (hit) {
+      if (name === "日付") return normalizeDateValue(hit[1]);
+      return hit[1] ?? "";
+    }
+  }
+  return "";
+}
+
+function clamp(n, min, max) {
+  return Math.max(min, Math.min(max, n));
+}
+
+function clamp01(n) {
+  return clamp(n, 0, 1);
+}
+
+function makeDefaultPhase(name = "Phase 1") {
+  return {
+    id: uid("phase"),
+    name,
+    pieces: [],
+    annotations: [],
+  };
+}
+
+function iconPath(folder, fileBaseName) {
+  return `/icons/${folder}/${encodeURIComponent(fileBaseName)}.png`;
+}
+
+function getArrowControlPoint(arrow) {
+  const x1 = arrow.x1;
+  const y1 = arrow.y1;
+  const x2 = arrow.x2;
+  const y2 = arrow.y2;
+  const bend = Number(arrow.bend ?? 0.2);
+
+  const mx = (x1 + x2) / 2;
+  const my = (y1 + y2) / 2;
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const len = Math.sqrt(dx * dx + dy * dy) || 0.0001;
+
+  const px = -dy / len;
+  const py = dx / len;
+  const amount = len * bend;
+
+  return {
+    cx: clamp01(mx + px * amount),
+    cy: clamp01(my + py * amount),
+  };
+}
+
+function arrowPathD(arrow, w = 1000, h = 625) {
+  const { cx, cy } = getArrowControlPoint(arrow);
+  return `M ${arrow.x1 * w} ${arrow.y1 * h} Q ${cx * w} ${cy * h} ${arrow.x2 * w} ${arrow.y2 * h}`;
+}
+
+export default function App() {
+  const boardRef = useRef(null);
+
+  const initialPhase = useMemo(() => makeDefaultPhase("Phase 1"), []);
+  const [phases, setPhases] = useState([initialPhase]);
+  const [activePhaseId, setActivePhaseId] = useState(initialPhase.id);
+
+  const [mapType, setMapType] = useState("leo");
+  const [mapVariant, setMapVariant] = useState(1);
+
+  const [meta, setMeta] = useState({
+    date: "",
+    home: "",
+    away: "",
+    r: "",
+    half: "",
+    survivorTeam: "",
+    hunterTeam: "",
+  });
+
+  const [cipherSlots, setCipherSlots] = useState(DEFAULT_CIPHERS);
+
+  const [selectedPieceId, setSelectedPieceId] = useState(null);
+  const [selectedAnnotationId, setSelectedAnnotationId] = useState(null);
+
+  const [survivorChoice, setSurvivorChoice] = useState(SURVIVOR_NAMES[0] || "");
+  const [hunterChoice, setHunterChoice] = useState(HUNTER_NAMES[0] || "");
+
+  const [drawMode, setDrawMode] = useState("select"); // select | arrow
+  const [draftArrow, setDraftArrow] = useState(null);
+  const [currentArrowColor, setCurrentArrowColor] = useState(ARROW_COLORS[0].key);
+  const [currentArrowBend, setCurrentArrowBend] = useState(0.2);
+
+  const [workbook, setWorkbook] = useState(null);
+  const [selectedSheet, setSelectedSheet] = useState("");
+  const [sheetRows, setSheetRows] = useState([]);
+  const [searchText, setSearchText] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+
+  const activePhase = useMemo(
+    () => phases.find((p) => p.id === activePhaseId) || phases[0],
+    [phases, activePhaseId]
+  );
+
+  const currentMapUrl = useMemo(
+    () => `/maps/${mapType}_${mapVariant}.png`,
+    [mapType, mapVariant]
+  );
+
+  const filteredRows = useMemo(() => {
+    return sheetRows.filter((row) => {
+      const q = searchText.trim().toLowerCase();
+      const rowDate = normalizeDateValue(findValueByHeader(row, ["日付"]));
+
+      if (dateFrom && rowDate && rowDate < dateFrom) return false;
+      if (dateTo && rowDate && rowDate > dateTo) return false;
+
+      if (!q) return true;
+
+      return Object.values(row).some((v) =>
+        String(v ?? "").toLowerCase().includes(q)
+      );
+    });
+  }, [sheetRows, searchText, dateFrom, dateTo]);
+
+  const selectedPiece =
+    activePhase?.pieces.find((p) => p.id === selectedPieceId) || null;
+
+  const selectedAnnotation =
+    activePhase?.annotations.find((a) => a.id === selectedAnnotationId) || null;
+
+  function updateMeta(key, value) {
+    setMeta((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function updateCipherValue(index, value) {
+    setCipherSlots((prev) =>
+      prev.map((slot, i) => (i === index ? { ...slot, value } : slot))
+    );
+  }
+
+  function toggleCipherVisible(index) {
+    setCipherSlots((prev) =>
+      prev.map((slot, i) =>
+        i === index ? { ...slot, visible: !slot.visible } : slot
+      )
+    );
+  }
+
+  function updateActivePhase(mutator) {
+    setPhases((prev) =>
+      prev.map((p) => {
+        if (p.id !== activePhaseId) return p;
+        return mutator(cloneDeep(p));
+      })
+    );
+  }
+
+  function addCharacterPiece(role, name) {
+    if (!name) return;
+    const folder = role === "survivor" ? "survivors" : "hunters";
+
+    const newPiece = {
+      id: uid("piece"),
+      role,
+      name,
+      label: name,
+      icon: iconPath(folder, name),
+      x: 0.5,
+      y: 0.5,
+    };
+
+    updateActivePhase((phase) => {
+      phase.pieces.push(newPiece);
+      return phase;
+    });
+
+    setSelectedPieceId(newPiece.id);
+    setSelectedAnnotationId(null);
+    setDrawMode("select");
+  }
+
+  function updatePiece(pieceId, patch) {
+    updateActivePhase((phase) => {
+      phase.pieces = phase.pieces.map((p) =>
+        p.id === pieceId ? { ...p, ...patch } : p
+      );
+      return phase;
+    });
+  }
+
+  function deletePiece(pieceId) {
+    updateActivePhase((phase) => {
+      phase.pieces = phase.pieces.filter((p) => p.id !== pieceId);
+      return phase;
+    });
+    if (selectedPieceId === pieceId) setSelectedPieceId(null);
+  }
+
+  function addTextAnnotation() {
+    const ann = {
+      id: uid("ann"),
+      type: "text",
+      x: 0.5,
+      y: 0.5,
+      text: "テキスト",
+    };
+
+    updateActivePhase((phase) => {
+      phase.annotations.push(ann);
+      return phase;
+    });
+
+    setSelectedAnnotationId(ann.id);
+    setSelectedPieceId(null);
+    setDrawMode("select");
+  }
+
+  function updateAnnotation(annId, patch) {
+    updateActivePhase((phase) => {
+      phase.annotations = phase.annotations.map((a) =>
+        a.id === annId ? { ...a, ...patch } : a
+      );
+      return phase;
+    });
+  }
+
+  function deleteAnnotation(annId) {
+    updateActivePhase((phase) => {
+      phase.annotations = phase.annotations.filter((a) => a.id !== annId);
+      return phase;
+    });
+    if (selectedAnnotationId === annId) setSelectedAnnotationId(null);
+  }
+
+  function addPhase() {
+    const p = makeDefaultPhase(`Phase ${phases.length + 1}`);
+    setPhases((prev) => [...prev, p]);
+    setActivePhaseId(p.id);
+    setSelectedPieceId(null);
+    setSelectedAnnotationId(null);
+    setDrawMode("select");
+  }
+
+  function renamePhase() {
+    if (!activePhase) return;
+    const name = window.prompt("新しいフェーズ名", activePhase.name);
+    if (!name) return;
+    setPhases((prev) =>
+      prev.map((p) => (p.id === activePhase.id ? { ...p, name } : p))
+    );
+  }
+
+  function duplicatePhase() {
+    if (!activePhase) return;
+    const copy = cloneDeep(activePhase);
+    copy.id = uid("phase");
+    copy.name = `${activePhase.name} copy`;
+    copy.pieces = copy.pieces.map((p) => ({ ...p, id: uid("piece") }));
+    copy.annotations = copy.annotations.map((a) => ({ ...a, id: uid("ann") }));
+    setPhases((prev) => [...prev, copy]);
+    setActivePhaseId(copy.id);
+    setSelectedPieceId(null);
+    setSelectedAnnotationId(null);
+    setDrawMode("select");
+  }
+
+  function deletePhase() {
+    if (phases.length <= 1) {
+      alert("最後の1フェーズは削除できません。");
+      return;
+    }
+    const idx = phases.findIndex((p) => p.id === activePhaseId);
+    const next = phases.filter((p) => p.id !== activePhaseId);
+    setPhases(next);
+    setActivePhaseId(next[Math.max(0, idx - 1)].id);
+    setSelectedPieceId(null);
+    setSelectedAnnotationId(null);
+    setDrawMode("select");
+  }
+
+  function exportJson() {
+    const data = {
+      meta,
+      cipherSlots,
+      mapType,
+      mapVariant,
+      phases,
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], {
+      type: "application/json",
+    });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "idv-board-data.json";
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  function importJson(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const data = JSON.parse(reader.result);
+        if (data.meta) setMeta(data.meta);
+        if (Array.isArray(data.cipherSlots) && data.cipherSlots.length === 7) {
+          setCipherSlots(
+            data.cipherSlots.map((slot, i) => ({
+              id: i + 1,
+              value: String(slot?.value ?? "0"),
+              visible: Boolean(slot?.visible),
+            }))
+          );
+        }
+        if (data.mapType) setMapType(data.mapType);
+        if (data.mapVariant) setMapVariant(data.mapVariant);
+        if (Array.isArray(data.phases) && data.phases.length) {
+          setPhases(data.phases);
+          setActivePhaseId(data.phases[0].id);
+          setSelectedPieceId(null);
+          setSelectedAnnotationId(null);
+          setDrawMode("select");
+        }
+      } catch {
+        alert("JSONの読み込みに失敗しました。");
+      }
+      e.target.value = "";
+    };
+    reader.readAsText(file, "utf-8");
+  }
+
+  async function exportBoardImage() {
+    if (!boardRef.current) return;
+    const canvas = await html2canvas(boardRef.current, {
+      useCORS: true,
+      backgroundColor: null,
+    });
+    const a = document.createElement("a");
+    a.href = canvas.toDataURL("image/png");
+    a.download = "idv-board.png";
+    a.click();
+  }
+
+  async function importWorkbook(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, {
+        type: "array",
+        cellDates: true,
+      });
+
+      setWorkbook(wb);
+      const first = wb.SheetNames[0] || "";
+      setSelectedSheet(first);
+      setSheetRows(readSheetRows(wb, first));
+    } catch {
+      alert("Excelの読み込みに失敗しました。");
+    }
+
+    e.target.value = "";
+  }
+
+  function changeSheet(name) {
+    setSelectedSheet(name);
+    setSheetRows(readSheetRows(workbook, name));
+  }
+
+  function applyRowToMeta(row) {
+    setMeta((prev) => ({
+      ...prev,
+      date: String(findValueByHeader(row, ["日付"])),
+      home: String(findValueByHeader(row, ["Home"])),
+      away: String(findValueByHeader(row, ["Away"])),
+      r: String(findValueByHeader(row, ["R"])),
+      half: String(findValueByHeader(row, ["前後半", "前半後半", "陣営"])),
+      survivorTeam: String(findValueByHeader(row, ["S", "サバ", "サバイバー"])),
+      hunterTeam: String(findValueByHeader(row, ["H", "ハンター"])),
+    }));
+  }
+
+  function getBoardPointFromEvent(ev) {
+    const rect = boardRef.current?.getBoundingClientRect();
+    if (!rect) return null;
+    return {
+      x: clamp01((ev.clientX - rect.left) / rect.width),
+      y: clamp01((ev.clientY - rect.top) / rect.height),
+    };
+  }
+
+  function handleBoardPointerDown(ev) {
+    if (drawMode !== "arrow") return;
+    const pt = getBoardPointFromEvent(ev);
+    if (!pt) return;
+
+    setDraftArrow({
+      x1: pt.x,
+      y1: pt.y,
+      x2: pt.x,
+      y2: pt.y,
+      color: currentArrowColor,
+      bend: currentArrowBend,
+    });
+  }
+
+  function handleBoardPointerMove(ev) {
+    if (!draftArrow) return;
+    const pt = getBoardPointFromEvent(ev);
+    if (!pt) return;
+
+    setDraftArrow((prev) =>
+      prev
+        ? {
+            ...prev,
+            x2: pt.x,
+            y2: pt.y,
+          }
+        : prev
+    );
+  }
+
+  function handleBoardPointerUp() {
+    if (!draftArrow) return;
+
+    const dx = draftArrow.x2 - draftArrow.x1;
+    const dy = draftArrow.y2 - draftArrow.y1;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    if (dist > 0.01) {
+      const ann = {
+        id: uid("ann"),
+        type: "arrow",
+        ...draftArrow,
+      };
+
+      updateActivePhase((phase) => {
+        phase.annotations.push(ann);
+        return phase;
+      });
+
+      setSelectedAnnotationId(ann.id);
+      setSelectedPieceId(null);
+    }
+
+    setDraftArrow(null);
+    setDrawMode("select");
+  }
+
+  function startPieceDrag(ev, piece) {
+    ev.stopPropagation();
+    setSelectedPieceId(piece.id);
+    setSelectedAnnotationId(null);
+    setDrawMode("select");
+
+    const startX = ev.clientX;
+    const startY = ev.clientY;
+    const origX = piece.x;
+    const origY = piece.y;
+    const rect = boardRef.current?.getBoundingClientRect();
+    if (!rect) return;
+
+    function onMove(e) {
+      const dx = (e.clientX - startX) / rect.width;
+      const dy = (e.clientY - startY) / rect.height;
+      updatePiece(piece.id, {
+        x: clamp(origX + dx, 0.03, 0.97),
+        y: clamp(origY + dy, 0.03, 0.97),
+      });
+    }
+
+    function onUp() {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    }
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  }
+
+  function startAnnotationDrag(ev, ann) {
+    ev.stopPropagation();
+    setSelectedAnnotationId(ann.id);
+    setSelectedPieceId(null);
+    setDrawMode("select");
+
+    const startX = ev.clientX;
+    const startY = ev.clientY;
+    const base = cloneDeep(ann);
+    const rect = boardRef.current?.getBoundingClientRect();
+    if (!rect) return;
+
+    function onMove(e) {
+      const dx = (e.clientX - startX) / rect.width;
+      const dy = (e.clientY - startY) / rect.height;
+
+      if (ann.type === "arrow") {
+        updateAnnotation(ann.id, {
+          x1: clamp01(base.x1 + dx),
+          y1: clamp01(base.y1 + dy),
+          x2: clamp01(base.x2 + dx),
+          y2: clamp01(base.y2 + dy),
+        });
+      } else if (ann.type === "text") {
+        updateAnnotation(ann.id, {
+          x: clamp01(base.x + dx),
+          y: clamp01(base.y + dy),
+        });
+      }
+    }
+
+    function onUp() {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    }
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  }
+
+  return (
+    <div className="app">
+      <aside className="sidebar">
+        <h1>第五人格 戦術ボード</h1>
+
+        <section className="panel">
+          <h2>背景マップ</h2>
+
+          <div className="field">
+            <label>マップ</label>
+            <select value={mapType} onChange={(e) => setMapType(e.target.value)}>
+              <option value="leo">レオの思い出</option>
+              <option value="park">月の河公園</option>
+            </select>
+          </div>
+
+          <div className="field">
+            <label>組</label>
+            <select
+              value={mapVariant}
+              onChange={(e) => setMapVariant(Number(e.target.value))}
+            >
+              {[1, 2, 3, 4, 5].map((n) => (
+                <option key={n} value={n}>
+                  第{n}組
+                </option>
+              ))}
+            </select>
+          </div>
+        </section>
+
+        <section className="panel">
+          <h2>試合情報</h2>
+
+          <div className="grid2">
+            <div className="field">
+              <label>日付</label>
+              <input
+                type="text"
+                value={meta.date}
+                onChange={(e) => updateMeta("date", e.target.value)}
+                placeholder="yyyy-mm-dd"
+              />
+            </div>
+
+            <div className="field">
+              <label>セット(R)</label>
+              <input
+                type="text"
+                value={meta.r}
+                onChange={(e) => updateMeta("r", e.target.value)}
+              />
+            </div>
+
+            <div className="field">
+              <label>Home</label>
+              <input
+                type="text"
+                value={meta.home}
+                onChange={(e) => updateMeta("home", e.target.value)}
+              />
+            </div>
+
+            <div className="field">
+              <label>Away</label>
+              <input
+                type="text"
+                value={meta.away}
+                onChange={(e) => updateMeta("away", e.target.value)}
+              />
+            </div>
+
+            <div className="field">
+              <label>前後半</label>
+              <input
+                type="text"
+                value={meta.half}
+                onChange={(e) => updateMeta("half", e.target.value)}
+              />
+            </div>
+
+            <div className="field">
+              <label>サバチーム名</label>
+              <input
+                type="text"
+                value={meta.survivorTeam}
+                onChange={(e) => updateMeta("survivorTeam", e.target.value)}
+              />
+            </div>
+
+            <div className="field field-full">
+              <label>ハンターチーム名</label>
+              <input
+                type="text"
+                value={meta.hunterTeam}
+                onChange={(e) => updateMeta("hunterTeam", e.target.value)}
+              />
+            </div>
+          </div>
+        </section>
+
+        <section className="panel">
+          <h2>暗号機進捗</h2>
+          <div className="cipher-tool-grid">
+            {cipherSlots.map((slot, index) => (
+              <div className="cipher-tool-row" key={slot.id}>
+                <span className="cipher-tool-label">{slot.id}</span>
+                <input
+                  type="text"
+                  value={slot.value}
+                  onChange={(e) => updateCipherValue(index, e.target.value)}
+                />
+                <button onClick={() => toggleCipherVisible(index)}>
+                  {slot.visible ? "非表示" : "表示"}
+                </button>
+              </div>
+            ))}
+          </div>
+          <div className="hint">各行の「表示」で、その枠だけマップ上に出せます</div>
+        </section>
+
+        <section className="panel">
+          <h2>フェーズ</h2>
+
+          <div className="field">
+            <label>現在のフェーズ</label>
+            <select
+              value={activePhaseId}
+              onChange={(e) => {
+                setActivePhaseId(e.target.value);
+                setSelectedPieceId(null);
+                setSelectedAnnotationId(null);
+                setDrawMode("select");
+              }}
+            >
+              {phases.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="button-row">
+            <button onClick={addPhase}>追加</button>
+            <button onClick={renamePhase}>名前変更</button>
+            <button onClick={duplicatePhase}>複製</button>
+            <button onClick={deletePhase}>削除</button>
+          </div>
+        </section>
+
+        <section className="panel">
+          <h2>駒追加</h2>
+
+          <div className="field">
+            <label>サバイバー</label>
+            <div className="inline-row">
+              <select
+                value={survivorChoice}
+                onChange={(e) => setSurvivorChoice(e.target.value)}
+              >
+                {SURVIVOR_NAMES.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+              <button onClick={() => addCharacterPiece("survivor", survivorChoice)}>
+                追加
+              </button>
+            </div>
+          </div>
+
+          <div className="field">
+            <label>ハンター</label>
+            <div className="inline-row">
+              <select
+                value={hunterChoice}
+                onChange={(e) => setHunterChoice(e.target.value)}
+              >
+                {HUNTER_NAMES.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+              <button onClick={() => addCharacterPiece("hunter", hunterChoice)}>
+                追加
+              </button>
+            </div>
+          </div>
+
+          {selectedPiece ? (
+            <>
+              <div className="field">
+                <label>選択中の駒ラベル</label>
+                <input
+                  type="text"
+                  value={selectedPiece.label}
+                  onChange={(e) =>
+                    updatePiece(selectedPiece.id, { label: e.target.value })
+                  }
+                />
+              </div>
+
+              <div className="button-row">
+                <button onClick={() => deletePiece(selectedPiece.id)}>駒を削除</button>
+              </div>
+            </>
+          ) : (
+            <div className="hint">盤面上の駒をクリックするとラベル編集できます</div>
+          )}
+        </section>
+
+        <section className="panel">
+          <h2>注釈</h2>
+
+          <div className="field">
+            <label>新規矢印の色</label>
+            <div className="color-row">
+              {ARROW_COLORS.map((c) => (
+                <button
+                  key={c.key}
+                  className={`color-chip ${currentArrowColor === c.key ? "selected-color" : ""}`}
+                  style={{ backgroundColor: c.key }}
+                  onClick={() => setCurrentArrowColor(c.key)}
+                  title={c.label}
+                />
+              ))}
+            </div>
+          </div>
+
+          <div className="field">
+            <label>新規矢印の曲がり</label>
+            <input
+              type="range"
+              min="0"
+              max="0.5"
+              step="0.01"
+              value={currentArrowBend}
+              onChange={(e) => setCurrentArrowBend(Number(e.target.value))}
+            />
+          </div>
+
+          <div className="button-row">
+            <button
+              className={drawMode === "arrow" ? "active-btn" : ""}
+              onClick={() => {
+                setDrawMode((prev) => (prev === "arrow" ? "select" : "arrow"));
+                setSelectedPieceId(null);
+                setSelectedAnnotationId(null);
+              }}
+            >
+              曲線矢印描画
+            </button>
+
+            <button onClick={addTextAnnotation}>テキスト追加</button>
+
+            {selectedAnnotation && (
+              <button onClick={() => deleteAnnotation(selectedAnnotation.id)}>
+                選択注釈を削除
+              </button>
+            )}
+          </div>
+
+          <div className="hint">
+            {drawMode === "arrow"
+              ? "盤面上でドラッグすると曲線矢印を引けます"
+              : "矢印描画OFF"}
+          </div>
+
+          {selectedAnnotation?.type === "arrow" && (
+            <>
+              <div className="field">
+                <label>選択中矢印の色</label>
+                <div className="color-row">
+                  {ARROW_COLORS.map((c) => (
+                    <button
+                      key={c.key}
+                      className={`color-chip ${selectedAnnotation.color === c.key ? "selected-color" : ""}`}
+                      style={{ backgroundColor: c.key }}
+                      onClick={() =>
+                        updateAnnotation(selectedAnnotation.id, { color: c.key })
+                      }
+                      title={c.label}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              <div className="field">
+                <label>選択中矢印の曲がり</label>
+                <input
+                  type="range"
+                  min="0"
+                  max="0.5"
+                  step="0.01"
+                  value={Number(selectedAnnotation.bend ?? 0.2)}
+                  onChange={(e) =>
+                    updateAnnotation(selectedAnnotation.id, {
+                      bend: Number(e.target.value),
+                    })
+                  }
+                />
+              </div>
+            </>
+          )}
+
+          {selectedAnnotation?.type === "text" && (
+            <div className="field">
+              <label>テキスト内容</label>
+              <input
+                type="text"
+                value={selectedAnnotation.text}
+                onChange={(e) =>
+                  updateAnnotation(selectedAnnotation.id, { text: e.target.value })
+                }
+              />
+            </div>
+          )}
+        </section>
+
+        <section className="panel">
+          <h2>JSON / 書き出し</h2>
+
+          <div className="button-row">
+            <button onClick={exportJson}>JSON保存</button>
+            <button onClick={exportBoardImage}>盤面画像を書き出し</button>
+          </div>
+
+          <div className="field">
+            <label>JSON読込</label>
+            <input type="file" accept=".json,application/json" onChange={importJson} />
+          </div>
+        </section>
+
+        <section className="panel">
+          <h2>Excel試験連携</h2>
+
+          <div className="field">
+            <label>大会試合データ.xlsx</label>
+            <input type="file" accept=".xlsx,.xls" onChange={importWorkbook} />
+          </div>
+
+          {workbook && (
+            <>
+              <div className="field">
+                <label>シート</label>
+                <select
+                  value={selectedSheet}
+                  onChange={(e) => changeSheet(e.target.value)}
+                >
+                  {workbook.SheetNames.map((name) => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="field">
+                <label>キーワード検索</label>
+                <input
+                  type="text"
+                  value={searchText}
+                  onChange={(e) => setSearchText(e.target.value)}
+                  placeholder="Home / Away / チーム名など"
+                />
+              </div>
+
+              <div className="grid2">
+                <div className="field">
+                  <label>日付From</label>
+                  <input
+                    type="date"
+                    value={dateFrom}
+                    onChange={(e) => setDateFrom(e.target.value)}
+                  />
+                </div>
+
+                <div className="field">
+                  <label>日付To</label>
+                  <input
+                    type="date"
+                    value={dateTo}
+                    onChange={(e) => setDateTo(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="button-row">
+                <button
+                  onClick={() => {
+                    setSearchText("");
+                    setDateFrom("");
+                    setDateTo("");
+                  }}
+                >
+                  検索条件クリア
+                </button>
+              </div>
+
+              <div className="rows-box">
+                {filteredRows.slice(0, 50).map((row, idx) => (
+                  <button
+                    key={idx}
+                    className="row-item"
+                    onClick={() => applyRowToMeta(row)}
+                    title="クリックで試合情報へ反映"
+                  >
+                    <div>
+                      {String(findValueByHeader(row, ["日付"]))} /{" "}
+                      {String(findValueByHeader(row, ["Home"]))} vs{" "}
+                      {String(findValueByHeader(row, ["Away"]))}
+                    </div>
+                    <div className="row-sub">
+                      R:{String(findValueByHeader(row, ["R"]))} / 前後半:
+                      {String(findValueByHeader(row, ["前後半", "前半後半", "陣営"]))}
+                    </div>
+                  </button>
+                ))}
+
+                {filteredRows.length > 50 && (
+                  <div className="hint">50件まで表示中です。検索で絞り込んでください。</div>
+                )}
+
+                {!filteredRows.length && (
+                  <div className="hint">一致する行がありません。</div>
+                )}
+              </div>
+            </>
+          )}
+        </section>
+      </aside>
+
+      <main className="main">
+        <div className="meta-bar">
+          <span>{meta.date || "日付未入力"}</span>
+          <span>{meta.home || "Home"} vs {meta.away || "Away"}</span>
+          <span>R: {meta.r || "-"}</span>
+          <span>{meta.half || "前後半未入力"}</span>
+          <span>サバ: {meta.survivorTeam || "-"}</span>
+          <span>ハンター: {meta.hunterTeam || "-"}</span>
+          <span>
+            {mapType === "leo" ? "レオの思い出" : "月の河公園"} / 第{mapVariant}組
+          </span>
+        </div>
+
+        <div className="board-wrap">
+          <div
+            ref={boardRef}
+            className={`board ${mapType === "leo" ? "board-leo" : "board-park"}`}
+            style={{ backgroundImage: `url(${currentMapUrl})` }}
+            onPointerDown={handleBoardPointerDown}
+            onPointerMove={handleBoardPointerMove}
+            onPointerUp={handleBoardPointerUp}
+            onPointerLeave={handleBoardPointerUp}
+            onClick={() => {
+              setSelectedPieceId(null);
+              setSelectedAnnotationId(null);
+            }}
+          >
+            <svg className="annotation-layer" viewBox="0 0 1000 625" preserveAspectRatio="none">
+              <defs>
+                <marker
+                  id="arrowhead"
+                  markerWidth="12"
+                  markerHeight="10"
+                  refX="10"
+                  refY="5"
+                  orient="auto"
+                >
+                  <polygon points="0 0, 12 5, 0 10" fill="currentColor" />
+                </marker>
+              </defs>
+
+              {activePhase?.annotations.map((ann) => {
+                if (ann.type === "arrow") {
+                  const selected = selectedAnnotationId === ann.id;
+                  return (
+                    <g
+                      key={ann.id}
+                      onPointerDown={(e) => startAnnotationDrag(e, ann)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedAnnotationId(ann.id);
+                        setSelectedPieceId(null);
+                      }}
+                      style={{ cursor: "move", color: ann.color || ARROW_COLORS[0].key }}
+                    >
+                      <path
+                        d={arrowPathD(ann)}
+                        fill="none"
+                        stroke={ann.color || ARROW_COLORS[0].key}
+                        strokeWidth={selected ? 7 : 5}
+                        strokeLinecap="round"
+                        markerEnd="url(#arrowhead)"
+                      />
+                    </g>
+                  );
+                }
+
+                if (ann.type === "text") {
+                  const selected = selectedAnnotationId === ann.id;
+                  return (
+                    <g
+                      key={ann.id}
+                      onPointerDown={(e) => startAnnotationDrag(e, ann)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedAnnotationId(ann.id);
+                        setSelectedPieceId(null);
+                      }}
+                      style={{ cursor: "move" }}
+                    >
+                      <text
+                        x={ann.x * 1000}
+                        y={ann.y * 625}
+                        fontSize="28"
+                        fontWeight="700"
+                        fill={selected ? "#7c2d12" : "#a16207"}
+                        textAnchor="middle"
+                      >
+                        {ann.text}
+                      </text>
+                    </g>
+                  );
+                }
+
+                return null;
+              })}
+
+              {draftArrow && (
+                <g style={{ color: draftArrow.color }}>
+                  <path
+                    d={arrowPathD(draftArrow)}
+                    fill="none"
+                    stroke={draftArrow.color}
+                    strokeWidth="5"
+                    strokeLinecap="round"
+                    markerEnd="url(#arrowhead)"
+                    opacity="0.85"
+                  />
+                </g>
+              )}
+            </svg>
+
+            <div className="cipher-board-layer">
+              {cipherSlots
+                .filter((slot) => slot.visible)
+                .map((slot) => (
+                  <div key={slot.id} className="cipher-map-box">
+                    <span className="cipher-map-id">{slot.id}</span>
+                    <span className="cipher-map-value">{slot.value || "0"}</span>
+                  </div>
+                ))}
+            </div>
+
+            {activePhase?.pieces.map((piece) => {
+              const selected = selectedPieceId === piece.id;
+              return (
+                <div
+                  key={piece.id}
+                  className={`piece ${selected ? "selected" : ""}`}
+                  style={{
+                    left: `${piece.x * 100}%`,
+                    top: `${piece.y * 100}%`,
+                  }}
+                  onPointerDown={(e) => startPieceDrag(e, piece)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedPieceId(piece.id);
+                    setSelectedAnnotationId(null);
+                    setDrawMode("select");
+                  }}
+                  title={piece.label}
+                >
+                  <img
+                    className="piece-icon"
+                    src={piece.icon}
+                    alt={piece.name}
+                    draggable={false}
+                    onError={(e) => {
+                      e.currentTarget.style.visibility = "hidden";
+                    }}
+                  />
+                  <div className="piece-label">{piece.label}</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </main>
+    </div>
+  );
+}
