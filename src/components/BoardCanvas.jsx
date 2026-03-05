@@ -1,24 +1,29 @@
 import React from "react";
 
+function pointsToSvg(points, w = 1000, h = 625) {
+  if (!points || points.length === 0) return "";
+  return points.map((p) => `${p.x * w},${p.y * h}`).join(" ");
+}
+
 function BoardCanvas({
   boardRef,
   mapType,
   currentMapUrl,
   activePhase,
-  draftArrow,
+  draftStroke,
   cipherSlots,
   selectedPieceId,
   selectedAnnotationId,
-  arrowColors,
+  strokeColors,
   onBoardPointerDown,
   onBoardPointerMove,
   onBoardPointerUp,
   onClearBoardSelection,
   onStartAnnotationDrag,
   onStartPieceDrag,
+  onStartCipherDrag,
   onSelectAnnotation,
   onSelectPiece,
-  arrowPathD,
   setDrawMode,
 }) {
   return (
@@ -38,21 +43,9 @@ function BoardCanvas({
           viewBox="0 0 1000 625"
           preserveAspectRatio="none"
         >
-          <defs>
-            <marker
-              id="arrowhead"
-              markerWidth="12"
-              markerHeight="10"
-              refX="10"
-              refY="5"
-              orient="auto"
-            >
-              <polygon points="0 0, 12 5, 0 10" fill="currentColor" />
-            </marker>
-          </defs>
-
+        
           {activePhase?.annotations.map((ann) => {
-            if (ann.type === "arrow") {
+            if (ann.type === "freehand") {
               const selected = selectedAnnotationId === ann.id;
               return (
                 <g
@@ -64,17 +57,17 @@ function BoardCanvas({
                   }}
                   style={{
                     cursor: "move",
-                    color: ann.color || arrowColors[0].key,
+                    color: ann.color || strokeColors[0].key,
                   }}
                 >
-                  <path
-                    d={arrowPathD(ann)}
+                 <polyline
+                    points={pointsToSvg(ann.points)}
                     fill="none"
-                    stroke={ann.color || arrowColors[0].key}
+                    stroke={ann.color || strokeColors[0].key}
                     strokeWidth={selected ? 7 : 5}
                     strokeLinecap="round"
-                    markerEnd="url(#arrowhead)"
-                  />
+                    strokeLinejoin="round"
+                   />
                 </g>
               );
             }
@@ -108,31 +101,38 @@ function BoardCanvas({
             return null;
           })}
 
-          {draftArrow && (
-            <g style={{ color: draftArrow.color }}>
-              <path
-                d={arrowPathD(draftArrow)}
-                fill="none"
-                stroke={draftArrow.color}
-                strokeWidth="5"
-                strokeLinecap="round"
-                markerEnd="url(#arrowhead)"
-                opacity="0.85"
+           {draftStroke && (
+             <g>
+              <polyline
+                 points={pointsToSvg(draftStroke.points)}
+                 fill="none"
+                 stroke={draftStroke.color}
+                 strokeWidth="5"
+                 strokeLinecap="round"
+                 strokeLinejoin="round"
+                 opacity="0.85"
               />
-            </g>
-          )}
+             </g>
+           )}
         </svg>
 
         <div className="cipher-board-layer">
-          {cipherSlots
-            .filter((slot) => slot.visible)
-            .map((slot) => (
-              <div key={slot.id} className="cipher-map-box">
-                <span className="cipher-map-id">{slot.id}</span>
-                <span className="cipher-map-value">{slot.value || "0"}</span>
-              </div>
-            ))}
-        </div>
+  {cipherSlots.filter((slot) => slot.visible).map((slot) => (
+    <div
+      key={slot.id}
+      className="cipher-map-box"
+      style={{
+        left: `${(slot.x ?? 0.2) * 100}%`,
+        top: `${(slot.y ?? 0.2) * 100}%`,
+        transform: "translate(-50%, -50%)",
+      }}
+      onPointerDown={(e) => onStartCipherDrag(e, slot)}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <span className="cipher-map-value">{slot.value || "0"}</span>
+    </div>
+  ))}
+</div>
 
         {activePhase?.pieces.map((piece) => {
           const selected = selectedPieceId === piece.id;

@@ -1,11 +1,9 @@
 import React from "react";
 
 function AnnotationPanel({
-  arrowColors,
-  currentArrowColor,
-  setCurrentArrowColor,
-  currentArrowBend,
-  setCurrentArrowBend,
+   strokeColors,
+   currentStrokeColor,
+   setCurrentStrokeColor,
   drawMode,
   setDrawMode,
   onAddTextAnnotation,
@@ -19,43 +17,31 @@ function AnnotationPanel({
       <h2>注釈</h2>
 
       <div className="field">
-        <label>新規矢印の色</label>
+       <label>描画色</label>
         <div className="color-row">
-          {arrowColors.map((c) => (
+          {strokeColors.map((c) => (
             <button
               key={c.key}
               className={`color-chip ${
-                currentArrowColor === c.key ? "selected-color" : ""
+                currentStrokeColor === c.key ? "selected-color" : ""
               }`}
               style={{ backgroundColor: c.key }}
-              onClick={() => setCurrentArrowColor(c.key)}
-              title={c.label}
+              onClick={() => setCurrentStrokeColor(c.key)}
+               title={c.label}
             />
           ))}
         </div>
       </div>
 
-      <div className="field">
-        <label>新規矢印の曲がり</label>
-        <input
-          type="range"
-          min="0"
-          max="0.5"
-          step="0.01"
-          value={currentArrowBend}
-          onChange={(e) => setCurrentArrowBend(Number(e.target.value))}
-        />
-      </div>
-
       <div className="button-row">
         <button
-          className={drawMode === "arrow" ? "active-btn" : ""}
+          className={drawMode === "freehand" ? "active-btn" : ""}
           onClick={() => {
-            setDrawMode((prev) => (prev === "arrow" ? "select" : "arrow"));
-            onClearSelections();
+            setDrawMode((prev) => (prev === "freehand" ? "select" : "freehand"));
+             onClearSelections();
           }}
         >
-          曲線矢印描画
+          自由描画
         </button>
 
         <button onClick={onAddTextAnnotation}>テキスト追加</button>
@@ -68,49 +54,33 @@ function AnnotationPanel({
       </div>
 
       <div className="hint">
-        {drawMode === "arrow"
-          ? "盤面上でドラッグすると曲線矢印を引けます"
-          : "矢印描画OFF"}
+        {drawMode === "freehand"
+           ? "盤面上でドラッグすると自由に線を描けます"
+           : "自由描画OFF"}
       </div>
 
-      {selectedAnnotation?.type === "arrow" && (
-        <>
-          <div className="field">
-            <label>選択中矢印の色</label>
-            <div className="color-row">
-              {arrowColors.map((c) => (
-                <button
-                  key={c.key}
-                  className={`color-chip ${
-                    selectedAnnotation.color === c.key ? "selected-color" : ""
-                  }`}
-                  style={{ backgroundColor: c.key }}
-                  onClick={() =>
-                    onUpdateAnnotation(selectedAnnotation.id, { color: c.key })
-                  }
-                  title={c.label}
-                />
-              ))}
-            </div>
-          </div>
-
-          <div className="field">
-            <label>選択中矢印の曲がり</label>
-            <input
-              type="range"
-              min="0"
-              max="0.5"
-              step="0.01"
-              value={Number(selectedAnnotation.bend ?? 0.2)}
-              onChange={(e) =>
-                onUpdateAnnotation(selectedAnnotation.id, {
-                  bend: Number(e.target.value),
-                })
-              }
-            />
-          </div>
-        </>
-      )}
+       {selectedAnnotation?.type === "freehand" && (
+  <div>
+    <div className="field">
+      <label>選択中の線の色</label>
+      <div className="color-row">
+        {strokeColors.map((c) => (
+          <button
+            key={c.key}
+            className={`color-chip ${
+              selectedAnnotation.color === c.key ? "selected-color" : ""
+            }`}
+            style={{ backgroundColor: c.key }}
+            onClick={() =>
+              onUpdateAnnotation(selectedAnnotation.id, { color: c.key })
+            }
+            title={c.label}
+          />
+        ))}
+      </div>
+    </div>
+  </div>
+)}
 
       {selectedAnnotation?.type === "text" && (
         <div className="field">

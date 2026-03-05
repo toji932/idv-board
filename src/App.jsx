@@ -16,7 +16,7 @@ import ExportPanel from "./components/ExportPanel";
 const SURVIVOR_NAMES = [
   "エンジ", "オフェ", "カウボーイ", "バーメ", "バッツ", "ファウロ", "ポスト",
   "マジシャン", "医師", "応援団", "火災", "画家", "患者", "玩具", "気象", "記者",
-  "騎士", "技師", "弓使い", "泣きピ", "救援", "曲芸師", "空軍", "幻灯師", "幸運児",
+  "騎士", "技師", "弓使い", "泣きピ", "教授", "曲芸師", "空軍", "幻灯師", "幸運児",
   "航海士", "骨董商", "昆虫", "祭司", "作曲家", "呪術師", "囚人", "小説家", "少女",
   "心眼", "心理", "人形師", "占い師", "脱出マスター", "探鉱者", "調香師", "庭師",
   "泥棒", "闘牛士", "納棺師", "弁護士", "墓守", "冒険家", "野人", "傭兵", "踊り子",
@@ -30,7 +30,7 @@ const HUNTER_NAMES = [
   "白黒無常", "魔女", "羊", "蝋人形師",
 ];
 
-const ARROW_COLORS = [
+const STROKE_COLORS = [
   { key: "#e11d48", label: "赤" },
   { key: "#2563eb", label: "青" },
   { key: "#16a34a", label: "緑" },
@@ -42,6 +42,8 @@ const DEFAULT_CIPHERS = Array.from({ length: 7 }, (_, i) => ({
   id: i + 1,
   value: "0",
   visible: false,
+  x: 0.14 + 0.10 * i, // 0..1（左→右）
+  y: 0.16,            // 0..1（上）
 }));
 
 function uid(prefix = "id") {
@@ -162,37 +164,9 @@ function iconPath(folder, fileBaseName) {
   return `/icons/${folder}/${encodeURIComponent(fileBaseName)}.png`;
 }
 
-function getArrowControlPoint(arrow) {
-  const x1 = arrow.x1;
-  const y1 = arrow.y1;
-  const x2 = arrow.x2;
-  const y2 = arrow.y2;
-  const bend = Number(arrow.bend ?? 0.2);
-
-  const mx = (x1 + x2) / 2;
-  const my = (y1 + y2) / 2;
-  const dx = x2 - x1;
-  const dy = y2 - y1;
-  const len = Math.sqrt(dx * dx + dy * dy) || 0.0001;
-
-  const px = -dy / len;
-  const py = dx / len;
-  const amount = len * bend;
-
-  return {
-    cx: clamp01(mx + px * amount),
-    cy: clamp01(my + py * amount),
-  };
-}
-
-function arrowPathD(arrow, w = 1000, h = 625) {
-  const { cx, cy } = getArrowControlPoint(arrow);
-  return `M ${arrow.x1 * w} ${arrow.y1 * h} Q ${cx * w} ${cy * h} ${arrow.x2 * w} ${arrow.y2 * h}`;
-}
-
 export default function App() {
   const boardRef = useRef(null);
-　const exportAreaRef = useRef(null);
+  const exportAreaRef = useRef(null);
 
   const initialPhase = useMemo(() => makeDefaultPhase("Phase 1"), []);
   const [phases, setPhases] = useState([initialPhase]);
@@ -252,10 +226,9 @@ function selectPiece(pieceId) {
   const [survivorChoice, setSurvivorChoice] = useState(SURVIVOR_NAMES[0] || "");
   const [hunterChoice, setHunterChoice] = useState(HUNTER_NAMES[0] || "");
 
-  const [drawMode, setDrawMode] = useState("select"); // select | arrow
-  const [draftArrow, setDraftArrow] = useState(null);
-  const [currentArrowColor, setCurrentArrowColor] = useState(ARROW_COLORS[0].key);
-  const [currentArrowBend, setCurrentArrowBend] = useState(0.2);
+  const [drawMode, setDrawMode] = useState("select"); // select | freehand
+  const [draftStroke, setDraftStroke] = useState(null); // { color, points:[{x,y}...] }
+  const [currentStrokeColor, setCurrentStrokeColor] = useState(STROKE_COLORS[0].key);
 
   const [workbook, setWorkbook] = useState(null);
   const [selectedSheet, setSelectedSheet] = useState("");
@@ -465,39 +438,47 @@ function selectPiece(pieceId) {
   }
 
   function importJson(e) {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const file = e.target.files?.[0];
+  if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const data = JSON.parse(reader.result);
-        if (data.meta) setMeta(data.meta);
-        if (Array.isArray(data.cipherSlots) && data.cipherSlots.length === 7) {
-          setCipherSlots(
-            data.cipherSlots.map((slot, i) => ({
-              id: i + 1,
-              value: String(slot?.value ?? "0"),
-              visible: Boolean(slot?.visible),
-            }))
-          );
-        }
-        if (data.mapType) setMapType(data.mapType);
-        if (data.mapVariant) setMapVariant(data.mapVariant);
-        if (Array.isArray(data.phases) && data.phases.length) {
-          setPhases(data.phases);
-          setActivePhaseId(data.phases[0].id);
-          setSelectedPieceId(null);
-          setSelectedAnnotationId(null);
-          setDrawMode("select");
-        }
-      } catch {
-        alert("JSONの読み込みに失敗しました。");
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const data = JSON.parse(reader.result);
+
+      if (data.meta) setMeta(data.meta);
+
+      if (Array.isArray(data.cipherSlots) && data.cipherSlots.length === 7) {
+        setCipherSlots(
+          data.cipherSlots.map((slot, i) => ({
+            id: i + 1,
+            value: String(slot?.value ?? "0"),
+            visible: Boolean(slot?.visible),
+            x: typeof slot?.x === "number" ? slot.x : (DEFAULT_CIPHERS[i]?.x ?? 0.2),
+            y: typeof slot?.y === "number" ? slot.y : (DEFAULT_CIPHERS[i]?.y ?? 0.2),
+          }))
+        );
       }
-      e.target.value = "";
-    };
-    reader.readAsText(file, "utf-8");
-  }
+
+      if (data.mapType) setMapType(data.mapType);
+      if (data.mapVariant) setMapVariant(data.mapVariant);
+
+      if (Array.isArray(data.phases) && data.phases.length) {
+        setPhases(data.phases);
+        setActivePhaseId(data.phases[0].id);
+        setSelectedPieceId(null);
+        setSelectedAnnotationId(null);
+        setDrawMode("select");
+      }
+    } catch {
+      alert("JSONの読み込みに失敗しました。");
+    }
+
+    e.target.value = "";
+  };
+
+  reader.readAsText(file, "utf-8");
+}
 
 async function exportBoardImage() {
   if (!exportAreaRef.current) return;
@@ -563,62 +544,49 @@ async function exportBoardImage() {
   }
 
   function handleBoardPointerDown(ev) {
-    if (drawMode !== "arrow") return;
-    const pt = getBoardPointFromEvent(ev);
-    if (!pt) return;
+  if (drawMode !== "freehand") return;
+  const pt = getBoardPointFromEvent(ev);
+  if (!pt) return;
 
-    setDraftArrow({
-      x1: pt.x,
-      y1: pt.y,
-      x2: pt.x,
-      y2: pt.y,
-      color: currentArrowColor,
-      bend: currentArrowBend,
+  setDraftStroke({
+    color: currentStrokeColor,
+    points: [pt],
+  });
+}
+
+function handleBoardPointerMove(ev) {
+  if (!draftStroke) return;
+  const pt = getBoardPointFromEvent(ev);
+  if (!pt) return;
+
+  setDraftStroke((prev) =>
+    prev ? { ...prev, points: [...prev.points, pt] } : prev
+  );
+}
+
+function handleBoardPointerUp() {
+  if (!draftStroke) return;
+
+  if ((draftStroke.points?.length || 0) >= 2) {
+    const ann = {
+      id: uid("ann"),
+      type: "freehand",
+      color: draftStroke.color,
+      points: draftStroke.points,
+    };
+
+    updateActivePhase((phase) => {
+      phase.annotations.push(ann);
+      return phase;
     });
+
+    setSelectedAnnotationId(ann.id);
+    setSelectedPieceId(null);
   }
 
-  function handleBoardPointerMove(ev) {
-    if (!draftArrow) return;
-    const pt = getBoardPointFromEvent(ev);
-    if (!pt) return;
-
-    setDraftArrow((prev) =>
-      prev
-        ? {
-            ...prev,
-            x2: pt.x,
-            y2: pt.y,
-          }
-        : prev
-    );
-  }
-
-  function handleBoardPointerUp() {
-    if (!draftArrow) return;
-
-    const dx = draftArrow.x2 - draftArrow.x1;
-    const dy = draftArrow.y2 - draftArrow.y1;
-    const dist = Math.sqrt(dx * dx + dy * dy);
-
-    if (dist > 0.01) {
-      const ann = {
-        id: uid("ann"),
-        type: "arrow",
-        ...draftArrow,
-      };
-
-      updateActivePhase((phase) => {
-        phase.annotations.push(ann);
-        return phase;
-      });
-
-      setSelectedAnnotationId(ann.id);
-      setSelectedPieceId(null);
-    }
-
-    setDraftArrow(null);
-    setDrawMode("select");
-  }
+  setDraftStroke(null);
+  setDrawMode("select");
+}
 
   function startPieceDrag(ev, piece) {
     ev.stopPropagation();
@@ -651,45 +619,82 @@ async function exportBoardImage() {
     window.addEventListener("pointerup", onUp);
   }
 
-  function startAnnotationDrag(ev, ann) {
-    ev.stopPropagation();
-    setSelectedAnnotationId(ann.id);
-    setSelectedPieceId(null);
-    setDrawMode("select");
+function startCipherDrag(ev, slot) {
+  console.log("cipher down", slot.id);
+  ev.stopPropagation();
+  setSelectedPieceId(null);
+  setSelectedAnnotationId(null);
+  setDrawMode("select");
 
-    const startX = ev.clientX;
-    const startY = ev.clientY;
-    const base = cloneDeep(ann);
-    const rect = boardRef.current?.getBoundingClientRect();
-    if (!rect) return;
+  const startX = ev.clientX;
+  const startY = ev.clientY;
+  const origX = slot.x ?? 0.2;
+  const origY = slot.y ?? 0.2;
 
-    function onMove(e) {
-      const dx = (e.clientX - startX) / rect.width;
-      const dy = (e.clientY - startY) / rect.height;
+  const rect = boardRef.current?.getBoundingClientRect();
+  if (!rect) return;
 
-      if (ann.type === "arrow") {
-        updateAnnotation(ann.id, {
-          x1: clamp01(base.x1 + dx),
-          y1: clamp01(base.y1 + dy),
-          x2: clamp01(base.x2 + dx),
-          y2: clamp01(base.y2 + dy),
-        });
-      } else if (ann.type === "text") {
-        updateAnnotation(ann.id, {
-          x: clamp01(base.x + dx),
-          y: clamp01(base.y + dy),
-        });
-      }
-    }
+  function onMove(e) {
+    const dx = (e.clientX - startX) / rect.width;
+    const dy = (e.clientY - startY) / rect.height;
 
-    function onUp() {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-    }
-
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
+    setCipherSlots((prev) =>
+      prev.map((c) =>
+        c.id === slot.id
+          ? { ...c, x: clamp01(origX + dx), y: clamp01(origY + dy) }
+          : c
+      )
+    );
   }
+
+  function onUp() {
+    window.removeEventListener("pointermove", onMove);
+    window.removeEventListener("pointerup", onUp);
+  }
+
+  window.addEventListener("pointermove", onMove);
+  window.addEventListener("pointerup", onUp);
+}
+
+function startAnnotationDrag(ev, ann) {
+  ev.stopPropagation();
+  setSelectedAnnotationId(ann.id);
+  setSelectedPieceId(null);
+  setDrawMode("select");
+
+  const startX = ev.clientX;
+  const startY = ev.clientY;
+  const base = cloneDeep(ann);
+  const rect = boardRef.current?.getBoundingClientRect();
+  if (!rect) return;
+
+  function onMove(e) {
+    const dx = (e.clientX - startX) / rect.width;
+    const dy = (e.clientY - startY) / rect.height;
+
+    if (ann.type === "freehand") {
+      updateAnnotation(ann.id, {
+        points: (base.points || []).map((p) => ({
+          x: clamp01(p.x + dx),
+          y: clamp01(p.y + dy),
+        })),
+      });
+    } else if (ann.type === "text") {
+      updateAnnotation(ann.id, {
+        x: clamp01(base.x + dx),
+        y: clamp01(base.y + dy),
+      });
+    }
+  }
+
+  function onUp() {
+    window.removeEventListener("pointermove", onMove);
+    window.removeEventListener("pointerup", onUp);
+  }
+
+  window.addEventListener("pointermove", onMove);
+  window.addEventListener("pointerup", onUp);
+}
 
   return (
     <div className="app">
@@ -727,19 +732,17 @@ async function exportBoardImage() {
   />
 
   <AnnotationPanel
-    arrowColors={ARROW_COLORS}
-    currentArrowColor={currentArrowColor}
-    setCurrentArrowColor={setCurrentArrowColor}
-    currentArrowBend={currentArrowBend}
-    setCurrentArrowBend={setCurrentArrowBend}
-    drawMode={drawMode}
-    setDrawMode={setDrawMode}
-    onAddTextAnnotation={addTextAnnotation}
-    selectedAnnotation={selectedAnnotation}
-    onDeleteAnnotation={deleteAnnotation}
-    onUpdateAnnotation={updateAnnotation}
-    onClearSelections={clearSelections}
-  />
+  strokeColors={STROKE_COLORS}
+  currentStrokeColor={currentStrokeColor}
+  setCurrentStrokeColor={setCurrentStrokeColor}
+  drawMode={drawMode}
+  setDrawMode={setDrawMode}
+  onAddTextAnnotation={addTextAnnotation}
+  selectedAnnotation={selectedAnnotation}
+  onDeleteAnnotation={deleteAnnotation}
+  onUpdateAnnotation={updateAnnotation}
+  onClearSelections={clearSelections}
+/>
 
   <CipherPanel
     cipherSlots={cipherSlots}
@@ -789,20 +792,20 @@ async function exportBoardImage() {
       mapType={mapType}
       currentMapUrl={currentMapUrl}
       activePhase={activePhase}
-      draftArrow={draftArrow}
+      draftStroke={draftStroke}
       cipherSlots={cipherSlots}
       selectedPieceId={selectedPieceId}
       selectedAnnotationId={selectedAnnotationId}
-      arrowColors={ARROW_COLORS}
+      strokeColors={STROKE_COLORS}
       onBoardPointerDown={handleBoardPointerDown}
       onBoardPointerMove={handleBoardPointerMove}
       onBoardPointerUp={handleBoardPointerUp}
       onClearBoardSelection={clearBoardSelection}
       onStartAnnotationDrag={startAnnotationDrag}
       onStartPieceDrag={startPieceDrag}
+      onStartCipherDrag={startCipherDrag}
       onSelectAnnotation={selectAnnotation}
       onSelectPiece={selectPiece}
-      arrowPathD={arrowPathD}
       setDrawMode={setDrawMode}
     />
   </div>

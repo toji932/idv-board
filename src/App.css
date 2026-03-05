@@ -286,9 +286,11 @@ button:hover {
 
 .cipher-board-layer {
   position: absolute;
+  inset: 0;
   left: 12px;
   top: 12px;
-  z-index: 3;
+  z-index: 20;
+  pointer-events: none;
   display: grid;
   grid-template-columns: repeat(4, auto);
   gap: 8px;
@@ -296,7 +298,9 @@ button:hover {
 }
 
 .cipher-map-box {
-  min-width: 54px;
+  position: absolute;
+  pointer-events: auto;
+  min-width: 44px;
   padding: 6px 8px;
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.94);
@@ -306,6 +310,8 @@ button:hover {
   gap: 6px;
   font-weight: 700;
   font-size: 13px;
+  user-select: none;
+  touch-action: none;
 }
 
 .cipher-map-id {
@@ -399,4 +405,60 @@ button:hover {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+/* ===== Smartphone Landscape: PC-like layout ===== */
+/* 横向き + 高さが小さい端末（iPhone横など）を主に狙う */
+@media (orientation: landscape) and (max-height: 600px) {
+  /* 全体を横並びに固定 */
+  .app {
+    display: flex;
+    flex-direction: row;
+    height: 100vh;
+    /* iOSのアドレスバー変動対策（対応ブラウザで有効） */
+    height: 100dvh;
+    overflow: hidden;
+  }
+
+  /* 左パネル：固定幅＋縦スクロール */
+  .sidebar {
+    width: 360px;          /* 好みで 320〜420 に調整 */
+    max-width: 45vw;
+    height: 100%;
+    overflow-y: auto;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+    flex: 0 0 auto;
+  }
+
+  /* 右：盤面側を最大化 */
+  .main {
+    flex: 1 1 auto;
+    height: 100%;
+    overflow: hidden;      /* 盤面のはみ出しを止める */
+    display: flex;
+  }
+
+  /* 画像書き出し領域（MetaBar含む）を縦に収める */
+  .export-area {
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* 盤面は残り全高を使う */
+  .board-wrap {
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+}
+
+/* さらに小さい横画面（超小型/古い端末）対策：パネル幅を少し縮める */
+@media (orientation: landscape) and (max-height: 420px) {
+  .sidebar {
+    width: 300px;
+    max-width: 48vw;
+  }
 }

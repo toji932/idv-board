@@ -6,7 +6,7 @@ export const MAP_OPTIONS = [
   { key: "eversleep", label: "永眠町" },
   { key: "church", label: "赤の教会" },
   { key: "lakeside", label: "湖景村" },
-  { key: "factory", label: "工場" },
+  { key: "factory", label: "軍需工場" },
   { key: "china", label: "中華街" },
 ];
 
