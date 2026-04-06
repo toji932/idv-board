@@ -1,12 +1,12 @@
 export const MAP_OPTIONS = [
-  { key: "leo", label: "レオの思い出" },
-  { key: "park", label: "月の河公園" },
-　{ key: "hospital", label: "聖心病院" },
+  { key: "leo", label: "レオ思" },
+  { key: "park", label: "公園" },
+　{ key: "hospital", label: "病院" },
   { key: "forest", label: "罪の森" },
   { key: "eversleep", label: "永眠町" },
-  { key: "church", label: "赤の教会" },
+  { key: "church", label: "教会" },
   { key: "lakeside", label: "湖景村" },
-  { key: "factory", label: "軍需工場" },
+  { key: "factory", label: "工場" },
   { key: "china", label: "中華街" },
 ];
 
