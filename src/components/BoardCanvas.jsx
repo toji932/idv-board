@@ -43,7 +43,6 @@ function BoardCanvas({
           viewBox="0 0 1000 625"
           preserveAspectRatio="none"
         >
-        
           {activePhase?.annotations.map((ann) => {
             if (ann.type === "freehand") {
               const selected = selectedAnnotationId === ann.id;
@@ -60,14 +59,14 @@ function BoardCanvas({
                     color: ann.color || strokeColors[0].key,
                   }}
                 >
-                 <polyline
+                  <polyline
                     points={pointsToSvg(ann.points)}
                     fill="none"
                     stroke={ann.color || strokeColors[0].key}
                     strokeWidth={selected ? 7 : 5}
                     strokeLinecap="round"
                     strokeLinejoin="round"
-                   />
+                  />
                 </g>
               );
             }
@@ -101,38 +100,40 @@ function BoardCanvas({
             return null;
           })}
 
-           {draftStroke && (
-             <g>
+          {draftStroke && (
+            <g>
               <polyline
-                 points={pointsToSvg(draftStroke.points)}
-                 fill="none"
-                 stroke={draftStroke.color}
-                 strokeWidth="5"
-                 strokeLinecap="round"
-                 strokeLinejoin="round"
-                 opacity="0.85"
+                points={pointsToSvg(draftStroke.points)}
+                fill="none"
+                stroke={draftStroke.color}
+                strokeWidth="5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                opacity="0.85"
               />
-             </g>
-           )}
+            </g>
+          )}
         </svg>
 
         <div className="cipher-board-layer">
-  {cipherSlots.filter((slot) => slot.visible).map((slot) => (
-    <div
-      key={slot.id}
-      className="cipher-map-box"
-      style={{
-        left: `${(slot.x ?? 0.2) * 100}%`,
-        top: `${(slot.y ?? 0.2) * 100}%`,
-        transform: "translate(-50%, -50%)",
-      }}
-      onPointerDown={(e) => onStartCipherDrag(e, slot)}
-      onClick={(e) => e.stopPropagation()}
-    >
-      <span className="cipher-map-value">{slot.value || "0"}</span>
-    </div>
-  ))}
-</div>
+          {cipherSlots
+            .filter((slot) => slot.visible)
+            .map((slot) => (
+              <div
+                key={slot.id}
+                className="cipher-map-box"
+                style={{
+                  left: `${(slot.x ?? 0.2) * 100}%`,
+                  top: `${(slot.y ?? 0.2) * 100}%`,
+                  transform: "translate(-50%, -50%)",
+                }}
+                onPointerDown={(e) => onStartCipherDrag(e, slot)}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <span className="cipher-map-value">{slot.value || "0"}</span>
+              </div>
+            ))}
+        </div>
 
         {activePhase?.pieces.map((piece) => {
           const selected = selectedPieceId === piece.id;
@@ -161,7 +162,10 @@ function BoardCanvas({
                   e.currentTarget.style.visibility = "hidden";
                 }}
               />
-              <div className="piece-label">{piece.label}</div>
+              <div className="piece-label">
+                {piece.label && <div>{piece.label}</div>}
+                {piece.persona && <div>{piece.persona}</div>}
+              </div>
             </div>
           );
         })}

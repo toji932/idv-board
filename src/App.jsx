@@ -12,6 +12,9 @@ import MetaBar from "./components/MetaBar";
 import BoardCanvas from "./components/BoardCanvas";
 import MapPanel from "./components/MapPanel";
 import ExportPanel from "./components/ExportPanel";
+import { getMapKeyFromPickM1, getMapLabel, isSameMapByPickM1 } from "./utils/mapData";
+import { normalizeMatchRow } from "./utils/normalizeMatchRow";
+import { buildPiecesFromMatch } from "./utils/buildPiecesFromMatch";
 
 const SURVIVOR_NAMES = [
   "エンジ", "オフェ", "カウボーイ", "バーメ", "バッツ", "ファウロ", "ポスト",
@@ -521,18 +524,51 @@ async function exportBoardImage() {
     setSheetRows(readSheetRows(workbook, name));
   }
 
-  function applyRowToMeta(row) {
-    setMeta((prev) => ({
-      ...prev,
-      date: String(findValueByHeader(row, ["日付"])),
-      home: String(findValueByHeader(row, ["Home"])),
-      away: String(findValueByHeader(row, ["Away"])),
-      r: String(findValueByHeader(row, ["R"])),
-      half: String(findValueByHeader(row, ["前後半", "前半後半", "陣営"])),
-      survivorTeam: String(findValueByHeader(row, ["S", "サバ", "サバイバー"])),
-      hunterTeam: String(findValueByHeader(row, ["H", "ハンター"])),
-    }));
+function applyRowToMeta(row) {
+  const normalized = normalizeMatchRow(row, findValueByHeader);
+  const rowMapKey = normalized.mapKey;
+  const currentMapKey = mapType;
+
+  if (!rowMapKey) {
+    alert(`pick_M1 をマップに変換できません: ${normalized.pickM1 || ""}`);
+    return;
   }
+
+  if (!isSameMapByPickM1(normalized.pickM1, currentMapKey)) {
+    alert(
+      `データのマップ(${getMapLabel(rowMapKey)})と現在の盤面(${getMapLabel(currentMapKey)})が一致しません`
+    );
+    return;
+  }
+
+  const nextPieces = buildPiecesFromMatch(normalized);
+
+  setMeta((prev) => ({
+    ...prev,
+    date: normalized.meta.date,
+    home: normalized.meta.home,
+    away: normalized.meta.away,
+    r: normalized.meta.round,
+    half: normalized.meta.half,
+    survivorTeam: normalized.meta.survivorTeam,
+    hunterTeam: normalized.meta.hunterTeam,
+  }));
+
+  setPhases((prev) =>
+    prev.map((phase) =>
+      phase.id === activePhaseId
+        ? {
+            ...phase,
+            pieces: nextPieces,
+          }
+        : phase
+    )
+  );
+
+  setSelectedPieceId(null);
+  setSelectedAnnotationId(null);
+  setDrawMode("select");
+}
 
   function getBoardPointFromEvent(ev) {
     const rect = boardRef.current?.getBoundingClientRect();

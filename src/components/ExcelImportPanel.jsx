@@ -77,11 +77,14 @@ function ExcelImportPanel({
 
           <div className="rows-box">
             {filteredRows.slice(0, 50).map((row, idx) => (
-              <button
-                key={idx}
-                className="row-item"
-                onClick={() => onApplyRowToMeta(row)}
-                title="クリックで試合情報へ反映"
+             <button
+               key={idx}
+               className="row-item"
+               onClick={() => {
+                 console.log("row button clicked", row);
+                 onApplyRowToMeta?.(row);
+               }}
+               title="クリックで試合情報へ反映"
               >
                 <div>
                   {String(findValueByHeader(row, ["日付"]))} /{" "}
