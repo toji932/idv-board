@@ -116,6 +116,22 @@ const PARK_GRID = {
   12: { x: 0.885, y: 0.743 },
 };
 
+const EVERSLEEP_GRID = {
+  1: { x: 0.26, y: 0.207 },
+  2: { x: 0.40, y: 0.207 },
+  3: { x: 0.54, y: 0.207 },
+
+  4: { x: 0.26, y: 0.50 },
+  5: { x: 0.40, y: 0.50 },
+  6: { x: 0.54, y: 0.50 },
+
+  7: { x: 0.26, y: 0.763 },
+  8: { x: 0.40, y: 0.763 },
+  9: { x: 0.54, y: 0.763 },
+
+　10:{ x: 0.70, y: 0.207 },
+};
+
 
 export const SPAWN_POSITIONS = {
   leo: LEO_GRID,
@@ -128,7 +144,7 @@ export const SPAWN_POSITIONS = {
   park: PARK_GRID,
   lakeside: LAKESIDE_GRID,
 
-  eversleep: {},
+  eversleep: EVERSLEEP_GRID,
 };
 
 export function getSpawnPosition(mapKey, spawnNo) {
