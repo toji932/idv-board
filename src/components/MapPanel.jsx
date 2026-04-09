@@ -1,5 +1,5 @@
 import React from "react";
-import { MAP_OPTIONS } from "../utils/mapData";
+import { MAP_OPTIONS, getMapLayouts } from "../utils/mapData";
 
 function MapPanel({
   mapType,
@@ -7,6 +7,8 @@ function MapPanel({
   mapVariant,
   setMapVariant,
 }) {
+  const layoutOptions = getMapLayouts(mapType);
+
   return (
     <section className="panel">
       <h2>背景マップ</h2>
@@ -28,7 +30,7 @@ function MapPanel({
           value={mapVariant}
           onChange={(e) => setMapVariant(Number(e.target.value))}
         >
-          {[1, 2, 3, 4, 5].map((n) => (
+          {layoutOptions.map((n) => (
             <option key={n} value={n}>
               第{n}組
             </option>
